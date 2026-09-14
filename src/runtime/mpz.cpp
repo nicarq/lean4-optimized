@@ -38,11 +38,15 @@ mpz::mpz(int v) {
     mpz_init_set_si(m_val, v);
 }
 
-mpz::mpz(uint64 v):
-    mpz(static_cast<unsigned>(v)) {
-    mpz tmp(static_cast<unsigned>(v >> 32));
-    mpz_mul_2exp(tmp.m_val, tmp.m_val, 32);
-    mpz_add(m_val, m_val, tmp.m_val);
+mpz::mpz(uint64 v) {
+    if constexpr (std::numeric_limits<unsigned long>::digits >= std::numeric_limits<uint64>::digits) {
+        mpz_init_set_ui(m_val, static_cast<unsigned long>(v));
+    } else {
+        mpz_init_set_ui(m_val, static_cast<unsigned>(v));
+        mpz tmp(static_cast<unsigned>(v >> 32));
+        mpz_mul_2exp(tmp.m_val, tmp.m_val, 32);
+        mpz_add(m_val, m_val, tmp.m_val);
+    }
 }
 
 mpz::mpz(int64 v) {
