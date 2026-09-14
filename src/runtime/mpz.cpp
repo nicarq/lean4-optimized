@@ -268,6 +268,10 @@ uint32 mpz::mod32() const {
 }
 
 uint64 mpz::mod64() const {
+    if constexpr (std::numeric_limits<unsigned long>::digits >= std::numeric_limits<uint64>::digits) {
+        uint64 low = static_cast<uint64>(mpz_get_ui(m_val));
+        return mpz_sgn(m_val) < 0 ? uint64(0) - low : low;
+    }
     mpz r;
     mpz_fdiv_r_2exp(r.m_val, m_val, 64);
     mpz l;
