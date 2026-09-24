@@ -30,6 +30,7 @@ public import Lean.Compiler.LCNF.CoalesceRC
 public import Lean.Compiler.LCNF.Toposort
 public import Lean.Compiler.LCNF.ExpandResetReuse
 public import Lean.Compiler.LCNF.SimpleGroundExpr
+import Lean.Compiler.LCNF.Metal
 
 public section
 
@@ -92,6 +93,7 @@ open Pass
 def builtinPassManager : PassManager := {
   basePasses := #[
     init,
+    Metal.pass,
     pullInstances,
     cse (shouldElimFunDecls := false),
     simp,

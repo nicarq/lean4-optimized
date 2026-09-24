@@ -53,6 +53,7 @@ if(CMAKE_SYSTEM_NAME MATCHES "Darwin")
 endif()
 
 set(LEAN_EXTRA_LINKER_FLAGS ${LEAN_EXTRA_LINKER_FLAGS_DEFAULT} CACHE STRING "Additional flags used by the linker")
+include(cmake/Modules/LeanMetal.cmake)
 set(
   LEAN_EXTRA_CXX_FLAGS
   ""

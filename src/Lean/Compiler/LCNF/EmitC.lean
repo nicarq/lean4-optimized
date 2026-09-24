@@ -13,6 +13,7 @@ import Lean.Compiler.LCNF.PhaseExt
 import Lean.Compiler.ExportAttr
 import Lean.Compiler.ModPkgExt
 import Lean.Compiler.LCNF.SimpleGroundExpr
+import Lean.Compiler.LCNF.Metal
 import Lean.Compiler.ClosedTermCache
 import Lean.Runtime
 import Lean.Compiler.LCNF.Internalize
@@ -1020,9 +1021,17 @@ def emitInitFn (phases : IRPhases) : EmitM Unit := do
     withErrRet do
       emit s!"{fn}(builtin)"
     emitLn "lean_dec_ref(res);"
-  for decl in (← getLocalDecls) do
+  let decls ← getLocalDecls
+  let hasMetal := (← getOtherModuleDecls).any (·.name == ``Array.mapUInt64Metal)
+  let names := if hasMetal then decls.foldl (fun s d => s.insert d.name) ({} : NameSet) else {}
+  for decl in decls do
     if phases == .all || (phases == .comptime) == isMarkedMeta env decl.name then
       emitDeclInit decl (isBuiltin := phases != .comptime)
+      if hasMetal then
+        let boxed := mkBoxedName decl.name
+        if names.contains boxed then
+          if let some source ← Metal.source? decls decl then
+            emitLn s!"lean_metal_register_u64((void*){← toCName boxed}, {quoteString source}, {decl.params.size});"
   emitLn "return lean_io_result_mk_ok(lean_box(0));"
   emitLn "}"
 

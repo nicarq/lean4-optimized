@@ -928,6 +928,10 @@ static inline lean_object * lean_array_get_borrowed(b_lean_obj_arg def_val, b_le
 }
 
 LEAN_EXPORT lean_obj_res lean_copy_expand_array(lean_obj_arg a, bool expand);
+LEAN_EXPORT void lean_metal_register_u64(void * fn, char const * source, unsigned arity);
+LEAN_EXPORT lean_obj_res lean_metal_map_u64(lean_obj_arg f, lean_obj_arg a);
+LEAN_EXPORT lean_obj_res lean_metal_available(void);
+LEAN_EXPORT lean_obj_res lean_metal_dispatch_count(void);
 // Equivalent to `lean_copy_expand_array` but used as a gadget to spot `Array` non-linearities in
 // profiles.
 LEAN_EXPORT lean_obj_res lean_copy_expand_array_nonlinear(lean_obj_arg a, bool expand);

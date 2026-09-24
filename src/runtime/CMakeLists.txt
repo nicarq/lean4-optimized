@@ -6,6 +6,7 @@ set(
   utf8.cpp
   object.cpp
   apply.cpp
+  metal.cpp
   exception.cpp
   interrupt.cpp
   memory.cpp
@@ -34,6 +35,11 @@ set(
   uv/system.cpp
   uv/signal.cpp
 )
+if(USE_METAL)
+  list(APPEND RUNTIME_OBJS metal_compute.mm)
+  set_source_files_properties(metal_compute.mm PROPERTIES LANGUAGE CXX COMPILE_FLAGS "-x objective-c++ -fobjc-arc")
+  set_source_files_properties(metal.cpp PROPERTIES COMPILE_DEFINITIONS LEAN_METAL)
+endif()
 if(USE_MIMALLOC)
   list(APPEND RUNTIME_OBJS ${LEAN_BINARY_DIR}/../mimalloc/src/mimalloc/src/static.c)
   # Lean code includes it as `lean/mimalloc.h` but for compiling `static.c` itself, add original dir

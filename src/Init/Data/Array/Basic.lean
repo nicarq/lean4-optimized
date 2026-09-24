@@ -1122,6 +1122,11 @@ Examples:
 def map {α : Type u} {β : Type v} (f : α → β) (as : Array α) : Array β :=
   Id.run <| as.mapM (pure <| f ·)
 
+/-- Internal native entry point for the optional Metal compiler pass. -/
+@[extern "lean_metal_map_u64"]
+def mapUInt64Metal (f : UInt64 → UInt64) (as : Array UInt64) : Array UInt64 :=
+  Id.run <| as.mapM (pure <| f ·)
+
 instance : Functor Array where
   map := map
 

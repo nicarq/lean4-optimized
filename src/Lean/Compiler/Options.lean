@@ -12,6 +12,11 @@ public section
 
 namespace Lean.Compiler
 
+register_builtin_option compiler.metal : Bool := {
+  defValue := false
+  descr := "experimental Metal acceleration of pure UInt64 array maps (CPU fallback otherwise)"
+}
+
 register_builtin_option compiler.check : Bool := {
   defValue := false
   descr    := "type check code after each compiler step (this is useful for debugging purses)"
