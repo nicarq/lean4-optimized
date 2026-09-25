@@ -1,5 +1,7 @@
 {
-  "workload": "Saved 13,680-block PiDEC replay",
+  "workload": "Constructed 13,680-block PiDEC arithmetic fixture",
+  "input_provenance": "First 738,720 serialized coefficients from a saved Rust parent witness, regrouped into blocks; 62,510 values reduced modulo the field. Not a reconstructed or verified complete parent witness.",
+  "normal_project_speedup_established": false,
   "nightstream_commit": "7f51e1010ce382d15206d4d1fabcb27d88754cfe",
   "lean_base": "f3b06c705e6c85f5314019d5d3baab0fec5b580c",
   "prior_metal_commit": "e3ebab8e6273c26d79fad302aabbd4ab391733ea",
