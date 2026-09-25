@@ -47,9 +47,7 @@ def prepareBlock (block : Nat) (parent : StoredAssignment ringDegree) : IO Prepa
   let some children := StoredSplit.splitChecked parent
     | throw (IO.userError s!"parent exceeds the strict B bound at block {block}")
   if live : block < Poseidon2HashChainV1Setup.messageColumns then
-    return (Vector.ofFn (fun row => PiDECNativeProduct.prepareKey
-      (PiDECCommitmentBlock.keyBlock Poseidon2HashChainV1Setup.productionSetup row ⟨block, live⟩)),
-      children.map PiDECNativeProduct.prepareDigit)
+    return (⟨block, live⟩, children.map PiDECNativeProduct.prepareDigit)
   else throw (IO.userError "block is outside the selected fixed key")
 
 def collect (initial : Array PreparedBlock)
@@ -110,7 +108,7 @@ def replay (parentPath outputPath : System.FilePath) (start finish : Nat) : IO U
   prepared ← collect prepared pending
   let count := prepared.size
   let preparedAt ← IO.monoMsNow
-  let products := batch prepared zero
+  let products := batch Poseidon2HashChainV1Setup.productionSeed prepared zero
   writeResult outputPath blocks start finish products
   let finished ← IO.monoMsNow
   IO.println s!"pidec_Lean_commitment_range=passed start={start} end={finish} computed_blocks={count} workers={workers} prepare_ms={preparedAt-started} compute_read_write_ms={finished-started}"

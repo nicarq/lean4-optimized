@@ -72,3 +72,4 @@ test_response=outdir/'test-link.rsp'
 test_response.write_text('\n'.join(json.dumps(a) for a in test_args)+'\n')
 run('test-link',[cc,'@'+str(test_response),'-o',outdir/'batchTest'])
 run('kernel-test-build',[cc,'-x','objective-c++','-O3','-std=c++17','-fobjc-arc','-isysroot',sdk,src/'test_batch.cpp',src/'metal_batch.mm','-framework','Foundation','-framework','Metal','-lc++','-o',outdir/'kernelTest'])
+run('key-test-build',[cc,'-x','objective-c++','-O3','-std=c++17','-fobjc-arc','-isysroot',sdk,src/'test_keys.cpp',src/'metal_batch.mm','-framework','Foundation','-framework','Metal','-lc++','-o',outdir/'keyTest'])
