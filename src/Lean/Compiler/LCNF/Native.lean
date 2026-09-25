@@ -320,9 +320,10 @@ private partial def branchCode (body : Code .pure) (vars : Vars)
 end
 
 private def preamble : String := "#include <metal_stdlib>\nusing namespace metal;\n\
-struct Inputs { device const ulong* values; device const ulong* tables;\n\
+struct Inputs { device const ulong* values; device const ulong* tables; device const ulong* previous;\n\
   ulong operator[](ulong address) const { return address >> 63 ?\n\
-    tables[address & 0x7ffffffffffffffful] : values[address]; } };\n\
+    tables[address & 0x7ffffffffffffffful] : address >> 62 ?\n\
+    previous[address & 0x3ffffffffffffffful] : values[address]; } };\n\
 inline ulong nat_add(ulong a,ulong b,thread bool* failed) {\n\
   ulong r=a+b; if(r<a) *failed=true; return r; }\n\
 inline ulong nat_mul(ulong a,ulong b,thread bool* failed) {\n\
@@ -365,9 +366,11 @@ public def compile? (fn : Name) : CoreM (Option Program) := do
     let source := preamble ++ "kernel void lean_native(device const ulong* values [[buffer(0)]],\n\
       device ulong* output [[buffer(1)]],device atomic_uint* errors [[buffer(2)]],\n\
       constant uint& count [[buffer(3)]],device const ulong* tables [[buffer(4)]],\n\
+      device const ulong* previous [[buffer(5)]],\n\
       uint index [[thread_position_in_grid]]) {\n\
-      if(index>=count) return; Inputs input{values,tables};\n\
-      bool fault=false; thread bool* failed=&fault;\n" ++ state.body ++ s!"if(fault) atomic_fetch_or_explicit(errors,1u,memory_order_relaxed); else output[index] = {out.text};\n}\n"
+      if(index>=count || atomic_load_explicit(errors,memory_order_relaxed)) return;\n\
+      if(index==0) output[0]=count; Inputs input{values,tables,previous};\n\
+      bool fault=false; thread bool* failed=&fault;\n" ++ state.body ++ s!"if(fault) atomic_fetch_or_explicit(errors,1u,memory_order_relaxed); else output[index+1] = {out.text};\n}\n"
     return some { source, captures, result, uniforms := state.uniforms }
   catch error =>
     trace[Compiler.native] "{fn}: {error.toMessageData}"

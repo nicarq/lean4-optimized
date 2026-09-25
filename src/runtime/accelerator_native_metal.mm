@@ -12,6 +12,7 @@ Released under Apache 2.0 license as described in the file LICENSE.
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace {
 struct native_device {
@@ -56,62 +57,78 @@ struct native_buffers {
     id<MTLBuffer> error;
     id<MTLBuffer> tables;
 
-    static id<MTLBuffer> reserve(id<MTLDevice> device, id<MTLBuffer> current, size_t bytes) {
-        if (!current || current.length < bytes)
-            return [device newBufferWithLength:bytes options:MTLResourceStorageModeShared];
+    static id<MTLBuffer> reserve(id<MTLDevice> device, id<MTLBuffer> current, size_t bytes,
+        bool intermediate = false) {
+        auto mode = intermediate ? MTLStorageModePrivate : MTLStorageModeShared;
+        if (!current || current.length < bytes || current.storageMode != mode)
+            return [device newBufferWithLength:bytes options:intermediate ?
+                MTLResourceStorageModePrivate : MTLResourceStorageModeShared];
         return current;
     }
 };
 }
 
-bool lean_native_metal_map(char const * source, uint64_t const * input, size_t words,
-    uint64_t const * tables, size_t table_words, void const * table_identity,
-    uint64_t * output, size_t count, uint64_t & device_ns, bool & table_cache_hit) {
+bool lean_native_metal_execute(lean_native_step * steps, size_t stages,
+    uint64_t * output, uint64_t & device_ns, unsigned & synchronizations) {
     @autoreleasepool {
         static native_device state;
         // A thread reuses its buffers only after its preceding command has completed.
         // Other Lean workers can keep their commands in flight on the shared queue.
-        thread_local native_buffers buffers;
-        if (!state.device || !state.queue || words > state.device.maxBufferLength / 8 ||
-            table_words > state.device.maxBufferLength / 8 ||
-            count > state.device.maxBufferLength / 8) return false;
-        id<MTLComputePipelineState> pipeline = state.pipeline(source);
-        if (!pipeline) return false;
-        buffers.input = native_buffers::reserve(state.device, buffers.input, words * 8);
-        buffers.output = native_buffers::reserve(state.device, buffers.output, count * 8);
-        buffers.error = native_buffers::reserve(state.device, buffers.error, sizeof(uint32_t));
-        if (!buffers.input || !buffers.output || !buffers.error) return false;
-        id<MTLBuffer> table_buffer;
-        if (table_identity) {
-            table_buffer = state.table_buffer(table_identity, tables, table_words, table_cache_hit);
-        } else {
-            buffers.tables = native_buffers::reserve(state.device, buffers.tables, table_words * 8);
-            if (buffers.tables) std::memcpy(buffers.tables.contents, tables, table_words * 8);
-            table_buffer = buffers.tables;
-        }
-        if (!table_buffer) return false;
-        std::memcpy(buffers.input.contents, input, words * 8);
-        *static_cast<uint32_t *>(buffers.error.contents) = 0;
+        thread_local std::vector<native_buffers> buffers;
+        if (!state.device || !state.queue || stages == 0) return false;
+        if (buffers.size() < stages) buffers.resize(stages);
+        buffers[0].error = native_buffers::reserve(state.device, buffers[0].error, sizeof(uint32_t));
+        if (!buffers[0].error) return false;
+        *static_cast<uint32_t *>(buffers[0].error.contents) = 0;
         id<MTLCommandBuffer> command = [state.queue commandBuffer];
-        id<MTLComputeCommandEncoder> encoder = [command computeCommandEncoder];
-        if (!command || !encoder) return false;
-        [encoder setComputePipelineState:pipeline];
-        [encoder setBuffer:buffers.input offset:0 atIndex:0];
-        [encoder setBuffer:buffers.output offset:0 atIndex:1];
-        [encoder setBuffer:buffers.error offset:0 atIndex:2];
-        uint32_t n = static_cast<uint32_t>(count);
-        [encoder setBytes:&n length:sizeof(n) atIndex:3];
-        [encoder setBuffer:table_buffer offset:0 atIndex:4];
-        [encoder dispatchThreads:MTLSizeMake(count, 1, 1)
-            threadsPerThreadgroup:MTLSizeMake(std::min<NSUInteger>(
-                pipeline.maxTotalThreadsPerThreadgroup, count), 1, 1)];
-        [encoder endEncoding];
+        if (!command) return false;
+        command.label = stages == 1 ? @"Lean native map" : @"Lean native chain";
+        for (size_t i = 0; i < stages; ++i) {
+            auto & step = steps[i];
+            auto & b = buffers[i];
+            if (step.words > state.device.maxBufferLength / 8 ||
+                step.table_words > state.device.maxBufferLength / 8 ||
+                step.count >= state.device.maxBufferLength / 8) return false;
+            id<MTLComputePipelineState> pipeline = state.pipeline(step.source);
+            if (!pipeline) return false;
+            b.input = native_buffers::reserve(state.device, b.input, step.words * 8);
+            b.output = native_buffers::reserve(state.device, b.output, (step.count + 1) * 8, i + 1 < stages);
+            if (!b.input || !b.output) return false;
+            id<MTLBuffer> table_buffer;
+            if (step.table_identity) {
+                table_buffer = state.table_buffer(step.table_identity, step.tables,
+                    step.table_words, step.table_cache_hit);
+            } else {
+                b.tables = native_buffers::reserve(state.device, b.tables, step.table_words * 8);
+                if (b.tables) std::memcpy(b.tables.contents, step.tables, step.table_words * 8);
+                table_buffer = b.tables;
+            }
+            if (!table_buffer) return false;
+            std::memcpy(b.input.contents, step.input, step.words * 8);
+            id<MTLComputeCommandEncoder> encoder = [command computeCommandEncoder];
+            if (!encoder) return false;
+            [encoder setComputePipelineState:pipeline];
+            [encoder setBuffer:b.input offset:0 atIndex:0];
+            [encoder setBuffer:b.output offset:0 atIndex:1];
+            [encoder setBuffer:buffers[0].error offset:0 atIndex:2];
+            uint32_t n = static_cast<uint32_t>(step.count);
+            [encoder setBytes:&n length:sizeof(n) atIndex:3];
+            [encoder setBuffer:table_buffer offset:0 atIndex:4];
+            [encoder setBuffer:(i ? buffers[i - 1].output : b.input) offset:0 atIndex:5];
+            [encoder dispatchThreads:MTLSizeMake(step.count, 1, 1)
+                threadsPerThreadgroup:MTLSizeMake(std::min<NSUInteger>(
+                    pipeline.maxTotalThreadsPerThreadgroup, step.count), 1, 1)];
+            // Default resource tracking orders dependent encoders in this command.
+            [encoder endEncoding];
+        }
         [command commit];
         [command waitUntilCompleted];
-        if (command.status != MTLCommandBufferStatusCompleted ||
-            *static_cast<uint32_t *>(buffers.error.contents) != 0) return false;
+        synchronizations = 1;
         device_ns = static_cast<uint64_t>((command.GPUEndTime - command.GPUStartTime) * 1e9);
-        std::memcpy(output, buffers.output.contents, count * 8);
+        if (command.status != MTLCommandBufferStatusCompleted ||
+            *static_cast<uint32_t *>(buffers[0].error.contents) != 0) return false;
+        std::memcpy(output, static_cast<uint64_t *>(buffers[stages - 1].output.contents) + 1,
+            steps[stages - 1].count * 8);
         return true;
     }
 }

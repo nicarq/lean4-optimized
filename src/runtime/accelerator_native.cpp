@@ -17,8 +17,7 @@ Released under Apache 2.0 license as described in the file LICENSE.
 #include <vector>
 
 #ifndef LEAN_USE_METAL_ACCELERATOR
-bool lean_native_metal_map(char const *, uint64_t const *, size_t,
-    uint64_t const *, size_t, void const *, uint64_t *, size_t, uint64_t &, bool &) { return false; }
+bool lean_native_metal_execute(lean_native_step *, size_t, uint64_t *, uint64_t &, unsigned &) { return false; }
 #endif
 
 namespace {
@@ -219,6 +218,58 @@ std::shared_ptr<uniform_data const> prepare_uniforms(unsigned captures, unsigned
     if (persistent) cache.emplace(values[0], entry);
     return entry;
 }
+
+struct prepared_step {
+    std::string source;
+    std::vector<uint64_t> input;
+    std::shared_ptr<uniform_data const> tables;
+    size_t count{0};
+    bool uniform_pack_hit{false};
+
+    bool prepare(char const * shader, char const * const * kinds, unsigned captures,
+        unsigned uniforms, lean_object * count_obj, lean_object * const * values,
+        lean_object * const * uniform_values, size_t dependency = SIZE_MAX,
+        size_t previous_count = 0, unsigned previous_kind = 0) {
+        if (!lean_is_scalar(count_obj)) return false;
+        count = lean_unbox(count_obj);
+        if (count == 0 || count > UINT32_MAX || !native_enabled(count)) return false;
+        input.resize(std::max<size_t>(1, static_cast<size_t>(captures) + uniforms));
+        for (unsigned i = 0; i < captures; ++i) {
+            std::string path = "CAPTURE_" + std::to_string(i);
+            char const * code = kinds[i];
+            auto type = data_type::parse(code, path);
+            if (!type || *code) return false;
+            if (i == dependency) {
+                if (type->kind != 'a' || type->element->kind != static_cast<char>('0' + previous_kind)) return false;
+                input[i] = uint64_t{1} << 62;
+                type->extent = previous_count;
+            } else {
+                uint64_t root;
+                if (!pack(*type, values[i], input, root)) return false;
+                input[i] = root;
+            }
+            type->define_extents(source);
+        }
+        tables = prepare_uniforms(captures, uniforms, kinds + captures, uniform_values, uniform_pack_hit);
+        if (!tables) return false;
+        for (unsigned i = 0; i < uniforms; ++i) input[captures + i] = tables->roots[i];
+        source += tables->extents;
+        source += shader;
+        return true;
+    }
+
+    lean_native_step dispatch() const {
+        return {source.c_str(), input.data(), input.size(), tables->words.data(),
+            tables->words.size(), tables->persistent ? tables.get() : nullptr, count};
+    }
+};
+
+lean_object * box_output(std::vector<uint64_t> const & output, unsigned kind) {
+    lean_object * result = lean_alloc_array(output.size(), output.size());
+    for (size_t i = 0; i < output.size(); ++i)
+        lean_array_set_core(result, i, box_word(output[i], kind));
+    return result;
+}
 }
 
 // Borrows all inputs. A null result asks the generated caller to run its original CPU code.
@@ -238,36 +289,16 @@ extern "C" LEAN_EXPORT lean_object * lean_accelerator_native_map(
     if (count == 0 || count > UINT32_MAX || count > SIZE_MAX / sizeof(uint64_t)) return nullptr;
     if (!native_enabled(count)) return nullptr;
     auto started = std::chrono::steady_clock::now();
-    std::string specialized;
-    size_t inputs = static_cast<size_t>(captures) + uniforms;
-    std::vector<uint64_t> input(std::max<size_t>(1, inputs));
-    for (size_t i = 0; i < captures; ++i) {
-        lean_object * value = lean_closure_get(closure, i);
-        char const * code = kinds[i];
-        auto type = data_type::parse(code, "CAPTURE_" + std::to_string(i));
-        uint64_t packed;
-        if (!type || *code || !pack(*type, value, input, packed)) return nullptr;
-        input[i] = packed;
-        type->define_extents(specialized);
-    }
-    bool uniform_pack_hit = false;
-    auto tables = prepare_uniforms(captures, uniforms, kinds + captures, values, uniform_pack_hit);
-    if (!tables) return nullptr;
-    for (size_t i = 0; i < uniforms; ++i) input[captures + i] = tables->roots[i];
-    specialized += tables->extents;
+    std::vector<lean_object *> captured(captures);
+    for (unsigned i = 0; i < captures; ++i) captured[i] = lean_closure_get(closure, i);
+    prepared_step prepared;
+    if (!prepared.prepare(source, kinds, captures, uniforms, count_obj, captured.data(), values)) return nullptr;
     std::vector<uint64_t> output(count);
     uint64_t device_ns = 0;
-    bool uniform_device_hit = false;
-    specialized += source;
-    bool valid = lean_native_metal_map(specialized.c_str(), input.data(), input.size(),
-        tables->words.data(), tables->words.size(), tables->persistent ? tables.get() : nullptr,
-        output.data(), count, device_ns, uniform_device_hit);
-    lean_object * result = nullptr;
-    if (valid) {
-        result = lean_alloc_array(count, count);
-        for (size_t i = 0; i < count; ++i)
-            lean_array_set_core(result, i, box_word(output[i], result_kind));
-    }
+    unsigned synchronizations = 0;
+    auto step = prepared.dispatch();
+    bool valid = lean_native_metal_execute(&step, 1, output.data(), device_ns, synchronizations);
+    lean_object * result = valid ? box_output(output, result_kind) : nullptr;
     if (char const * path = std::getenv("LEAN_ACCEL_TRACE_FILE")) {
         static std::mutex trace_mutex;
         std::lock_guard<std::mutex> lock(trace_mutex);
@@ -279,10 +310,51 @@ extern "C" LEAN_EXPORT lean_object * lean_accelerator_native_map(
                 "\"uniform_bytes\":%zu,\"uniform_pack_cache_hit\":%s,\"uniform_device_cache_hit\":%s,"
                 "\"device_time_ns\":%llu,\"elapsed_ns\":%lld}\n",
                 valid ? "metal" : "cpu", valid ? "true" : "false", count,
-                input.size() * sizeof(uint64_t), uniforms ? tables->words.size() * sizeof(uint64_t) : 0,
-                uniform_pack_hit ? "true" : "false", uniform_device_hit ? "true" : "false",
+                prepared.input.size() * sizeof(uint64_t), uniforms ? prepared.tables->words.size() * sizeof(uint64_t) : 0,
+                prepared.uniform_pack_hit ? "true" : "false", step.table_cache_hit ? "true" : "false",
                 static_cast<unsigned long long>(device_ns),
                 static_cast<long long>(elapsed));
+            std::fclose(trace);
+        }
+    }
+    return result;
+}
+
+// Borrows both maps' inputs. The caller retains the original CPU chain on failure.
+extern "C" LEAN_EXPORT lean_object * lean_accelerator_native_chain(
+    char const * first_source, char const * const * first_kinds, unsigned first_captures,
+    unsigned first_uniforms, unsigned first_kind, lean_object * first_count,
+    lean_object * const * first_captured, lean_object * const * first_values,
+    char const * last_source, char const * const * last_kinds, unsigned last_captures,
+    unsigned last_uniforms, unsigned last_kind, lean_object * last_count,
+    lean_object * const * last_values, lean_object * const * last_uniform_values, unsigned dependency) {
+    if (dependency >= last_captures) return nullptr;
+    auto started = std::chrono::steady_clock::now();
+    prepared_step first, last;
+    if (!first.prepare(first_source, first_kinds, first_captures, first_uniforms,
+            first_count, first_captured, first_values) ||
+        !last.prepare(last_source, last_kinds, last_captures, last_uniforms,
+            last_count, last_values, last_uniform_values, dependency, first.count, first_kind)) return nullptr;
+    lean_native_step steps[] = {first.dispatch(), last.dispatch()};
+    std::vector<uint64_t> output(last.count);
+    uint64_t device_ns = 0;
+    unsigned synchronizations = 0;
+    bool valid = lean_native_metal_execute(steps, 2, output.data(), device_ns, synchronizations);
+    lean_object * result = valid ? box_output(output, last_kind) : nullptr;
+    if (char const * path = std::getenv("LEAN_ACCEL_TRACE_FILE")) {
+        static std::mutex trace_mutex;
+        std::lock_guard<std::mutex> lock(trace_mutex);
+        if (FILE * trace = std::fopen(path, "a")) {
+            auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - started).count();
+            std::fprintf(trace, "{\"operation\":\"native_chain\",\"stages\":2,\"backend\":\"%s\","
+                "\"result_valid\":%s,\"count\":%zu,\"input_bytes\":%zu,"
+                "\"intermediate_device_bytes\":%zu,\"host_intermediate_bytes\":0,"
+                "\"synchronizations\":%u,\"device_time_ns\":%llu,\"elapsed_ns\":%lld}\n",
+                valid ? "metal" : "cpu", valid ? "true" : "false", last.count,
+                (first.input.size() + last.input.size()) * sizeof(uint64_t),
+                (first.count + 1) * sizeof(uint64_t), synchronizations,
+                static_cast<unsigned long long>(device_ns), static_cast<long long>(elapsed));
             std::fclose(trace);
         }
     }

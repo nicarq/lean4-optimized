@@ -69,3 +69,35 @@ That experiment also lowered native PiDEC product maps from unchanged source.
 The Lean 4.32.2 port needs fresh build and replay measurements. The current target
 is a 2× improvement over CPU for the clean build and saved replay; it has not been
 established. Small calls still need to be combined into larger device work.
+
+## Device residency
+
+Two dependent maps can execute as one native chain, including a first map
+behind a pure helper with object parameters. The intermediate
+word array stays in a private Metal buffer. The host packs external inputs,
+encodes both kernels in one command buffer, waits once, and boxes only the final
+result. If either stage fails, the original CPU chain produces the result.
+The compiler requires that the intermediate array does not escape; it preserves
+reference-count operations with an empty ownership token. This token has no
+intermediate elements. Lazy initializers and external calls cannot move into
+the preparation phase. The chain test checks changed inputs, empty arrays, and
+whole-chain fallback after overflow.
+
+This follows NVIDIA's [CUDA transfer guidance](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#data-transfer-between-host-and-device)
+and [CUDA Graph guidance](https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/cuda-graphs.html).
+For Metal, use [few command buffers](https://developer.apple.com/library/archive/documentation/3DDrawing/Conceptual/MTLBestPracticesGuide/CommandBuffers.html)
+and measure the complete command. Apple silicon shares physical memory, but
+Lean object packing, host allocation, and synchronization still have costs.
+
+The repeatable map benchmark is `tests/compile_bench/acceleratorNativeChain.lean`.
+After compiling it with the test harness, compare complete processes:
+
+```sh
+timeout 300 env LEAN_ACCELERATOR=cpu tests/compile_bench/acceleratorNativeChain.lean.out 65536 13680 chain
+timeout 300 env LEAN_ACCELERATOR=metal tests/compile_bench/acceleratorNativeChain.lean.out 65536 13680 split
+timeout 300 env LEAN_ACCELERATOR=metal tests/compile_bench/acceleratorNativeChain.lean.out 65536 13680 chain
+```
+
+Both Metal paths include initial shader compilation and output conversion. The
+map size comes from the conformance test; the repeat count matches the saved
+replay's block count. This is a map benchmark, not a Nightstream replay.

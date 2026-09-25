@@ -8,6 +8,17 @@ Released under Apache 2.0 license as described in the file LICENSE.
 
 // Dense captures, immutable tables, and ordered outputs. A non-null table identity
 // denotes immutable data retained for the process lifetime. No Lean objects cross.
-bool lean_native_metal_map(char const * source, uint64_t const * input, size_t words,
-    uint64_t const * tables, size_t table_words, void const * table_identity,
-    uint64_t * output, size_t count, uint64_t & device_ns, bool & table_cache_hit);
+struct lean_native_step {
+    char const * source;
+    uint64_t const * input;
+    size_t words;
+    uint64_t const * tables;
+    size_t table_words;
+    void const * table_identity;
+    size_t count;
+    bool table_cache_hit{false};
+};
+
+// Each step can read the preceding output. Only the last output reaches the host.
+bool lean_native_metal_execute(lean_native_step * steps, size_t stages,
+    uint64_t * output, uint64_t & device_ns, unsigned & synchronizations);

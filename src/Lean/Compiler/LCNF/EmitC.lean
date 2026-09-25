@@ -22,6 +22,7 @@ import Init.While
 import Lean.Compiler.LCNF.SimpCase
 import Lean.Compiler.LCNF.PrettyPrinter
 import Lean.Compiler.LCNF.Native
+import Lean.Compiler.LCNF.NativeChain
 
 namespace Lean.Compiler.LCNF
 
@@ -126,6 +127,7 @@ structure State where
   funMangleCache : Std.HashMap Name String := {}
   funInitMangleCache : Std.HashMap Name String := {}
   nativePrograms : Std.HashMap Name (Option Native.Program) := {}
+  nativeDisabled : Bool := false
 
 abbrev EmitM := ReaderT Context StateRefT State CompilerM
 
@@ -557,6 +559,12 @@ where
   declareParams (ps : Array (Param .impure)) : EmitM Unit := do
     ps.forM fun p => declareVar p.binderName p.type
 
+def nativeProgram? (mapper : Name) : EmitM (Option Native.Program) := do
+  if let some program := (← get).nativePrograms[mapper]? then return program
+  let program ← Native.compile? mapper
+  modify fun s => { s with nativePrograms := s.nativePrograms.insert mapper program }
+  return program
+
 def emitLetDecl (decl : LetDecl .impure) : EmitM Unit := do
   match decl.value with
   | .ctor info args => emitCtor info args
@@ -696,15 +704,12 @@ where
     if program?.isSome then emitLn "}\n}"
 
   nativeMapProgram? (fn : Name) (args : Array (Arg .impure)) : EmitM (Option Native.Program) := do
+    if (← get).nativeDisabled then return none
     unless (fn == `Array.ofFn._redArg || fn == ``Array.ofFn) && args.size >= 2 do return none
     let .fvar closure := args.back! | return none
     let some decl ← findLetDecl? (pu := .impure) closure | return none
     let .pap mapper captures := decl.value | return none
-    if let some program := (← get).nativePrograms[mapper]? then return program
-    let program ← Native.compile? mapper
-    let program := program.filter (·.captures.size == captures.size)
-    modify fun s => { s with nativePrograms := s.nativePrograms.insert mapper program }
-    return program
+    return (← nativeProgram? mapper).filter (·.captures.size == captures.size)
 
   emitPap (fn : Name) (args : Array (Arg .impure)) : EmitM Unit := do
     let some sig ← getImpureSignature? fn | unreachable!
@@ -819,38 +824,131 @@ where
     | .erased => false
 
 
+def emitNativeArg : Native.MapArg → EmitM Unit
+  | .actual arg => emit arg
+  | .nat n => emitCApp1 "lean_unsigned_to_nat" s!"{n}u"
+  | .global name type => do
+    let name ← toCName name
+    if type.isObj then emit s!"((lean_object*)({name}))"
+    else emitCApp1 type.boxOpName name
+
+def emitNativeConsumed (site : Native.MapSite) : EmitM Unit := do
+  let some sig ← getImpureSignature? site.function | unreachable!
+  for p in sig.params, a in site.args do
+    if !p.borrow && p.type.isObj then
+      emitCApp1 "lean_dec" a; emitLn ";"
+
+def emitNativeChainAttempt (chain : Native.Chain) (first last : Native.Program) : EmitM Unit := do
+  emit chain.last.decl.binderName; emitLn " = NULL;"
+  withEmitBlock do
+    for decl in chain.prepare do
+      emit decl.type.toCType; emit " "; emit decl.binderName; emitLn ";"
+      emitLetDecl decl
+    emitLn "extern uint8_t lean_accelerator_native_wanted(lean_object*);"
+    emit "if (lean_accelerator_native_wanted("; emitNativeArg chain.first.count
+    emit ") && lean_accelerator_native_wanted("; emitNativeArg chain.last.count
+    emitLn ")) {"
+    for arg in chain.first.captures do
+      if let .global name type := arg then
+        let ty := if isSimpleGroundDecl (← getEnv) name then "const lean_object*" else type.toCType
+        emitLn s!"extern {ty} {← toCName name};"
+    for stage in #[first, last], index in [:2] do
+      emitLn s!"static const char lean_source_{index}[] = {quoteString stage.source};"
+      let types := stage.captures ++ stage.uniforms.map (·.type)
+      let kinds := if types.isEmpty then "NULL"
+        else String.intercalate "," (types.toList.map (quoteString ·.encode))
+      emitLn s!"static const char* const lean_kinds_{index}[] = \{{kinds}};"
+      emitLn s!"lean_object* lean_uniforms_{index}[{max 1 stage.uniforms.size}];"
+      for h : i in [:stage.uniforms.size] do
+        let uniform := stage.uniforms[i]
+        let some sig ← getImpureSignature? uniform.function | unreachable!
+        let params := sig.params.filter (! ·.type.isVoid)
+        let name ← toCName uniform.function
+        emitLn s!"extern lean_object* {name}({String.intercalate "," (params.toList.map (·.type.toCType))});"
+        emitLn s!"lean_uniforms_{index}[{i}] = {name}({String.intercalate "," (params.toList.map (fun _ => "lean_box(0)"))});"
+    emit s!"lean_object* lean_captures[{max 1 chain.last.captures.size}] = \{"
+    for h : i in [:chain.last.captures.size] do
+      if i > 0 then emit ","
+      if i == chain.dependency then emit "NULL" else emitNativeArg chain.last.captures[i]
+    emitLn "};"
+    emit s!"lean_object* lean_first_captures[{max 1 chain.first.captures.size}] = \{"
+    if chain.first.captures.isEmpty then emit "NULL"
+    for h : i in [:chain.first.captures.size] do
+      if i > 0 then emit ","
+      emitNativeArg chain.first.captures[i]
+    emitLn "};"
+    emitLn "extern lean_object* lean_accelerator_native_chain(const char*,const char* const*,unsigned,unsigned,unsigned,lean_object*,lean_object* const*,lean_object* const*,const char*,const char* const*,unsigned,unsigned,unsigned,lean_object*,lean_object* const*,lean_object* const*,unsigned);"
+    emit chain.last.decl.binderName
+    emit s!" = lean_accelerator_native_chain(lean_source_0,lean_kinds_0,{first.captures.size},{first.uniforms.size},{first.result},"
+    emitNativeArg chain.first.count
+    emit s!",lean_first_captures,lean_uniforms_0,lean_source_1,lean_kinds_1,{last.captures.size},{last.uniforms.size},{last.result},"
+    emitNativeArg chain.last.count
+    emitLn s!",lean_captures,lean_uniforms_1,{chain.dependency});"
+    for arg in chain.first.captures, i in [:chain.first.captures.size] do
+      if let .global _ type := arg then
+        if !type.isObj then emitLn s!"lean_dec(lean_first_captures[{i}]);"
+    for stage in #[first, last], index in [:2] do
+      for i in [:stage.uniforms.size] do emitLn s!"lean_dec(lean_uniforms_{index}[{i}]);"
+    emitLn "}"
+
 mutual
 
-partial def emitBasicBlock (code : Code .impure) : EmitM Unit := do
+partial def emitBasicBlock (code : Code .impure) (stopAt : Option FVarId := none) : EmitM Unit := do
   match code with
-  | .jp (k := k) .. => emitBasicBlock k
+  | .jp (k := k) .. => emitBasicBlock k stopAt
   | .let decl k =>
+    if stopAt == some decl.fvarId then return
+    if !(← get).nativeDisabled then
+      if let some chain ← Native.chain? decl k then
+        if let some first ← nativeProgram? chain.first.mapper then
+          if let some last ← nativeProgram? chain.last.mapper then
+            if first.captures.size == chain.first.captures.size &&
+                last.captures.size == chain.last.captures.size &&
+                last.captures[chain.dependency]? == some (.array (.scalar first.result)) then
+              emitNativeChainAttempt chain first last
+              emit "if ("; emit chain.last.decl.binderName; emitLn " != NULL) {"
+              -- An empty ownership token keeps the original reference counts and
+              -- closure destruction. It never stores or exposes intermediate data.
+              emit decl.binderName; emitLn " = lean_alloc_array(0,0);"
+              emitNativeConsumed chain.first
+              modify fun s => { s with nativeDisabled := true }
+              emitBasicBlock k (some chain.last.decl.fvarId)
+              emitNativeConsumed chain.last
+              modify fun s => { s with nativeDisabled := false }
+              emitLn "} else {"
+              modify fun s => { s with nativeDisabled := true }
+              emitBasicBlock code (some chain.last.decl.fvarId)
+              emitLetDecl chain.last.decl
+              modify fun s => { s with nativeDisabled := false }
+              emitLn "}"
+              emitBasicBlock chain.continuation stopAt
+              return
     if ← isTailCall code then
       emitTailCall decl
     else
       emitLetDecl decl
-      emitBasicBlock k
+      emitBasicBlock k stopAt
   | .inc fvarId n check persistent k =>
     unless persistent do emitInc fvarId n check
-    emitBasicBlock k
+    emitBasicBlock k stopAt
   | .dec fvarId n check persistent objs? k =>
     unless persistent do emitDec fvarId n check objs?
-    emitBasicBlock k
+    emitBasicBlock k stopAt
   | .del fvarId k =>
     emitDel fvarId
-    emitBasicBlock k
+    emitBasicBlock k stopAt
   | .setTag fvarId cidx k =>
     emitSetTag fvarId cidx
-    emitBasicBlock k
+    emitBasicBlock k stopAt
   | .oset fvarId i y k =>
     emitOset fvarId i y
-    emitBasicBlock k
+    emitBasicBlock k stopAt
   | .uset fvarId i y k =>
     emitUset fvarId i y
-    emitBasicBlock k
+    emitBasicBlock k stopAt
   | .sset fvarId i offset y ty k =>
     emitSset fvarId i offset y ty
-    emitBasicBlock k
+    emitBasicBlock k stopAt
   | .cases cs => emitCases cs
   | .return fvarId => emitReturn fvarId
   | .jmp fvarId args => emitJmp fvarId args
