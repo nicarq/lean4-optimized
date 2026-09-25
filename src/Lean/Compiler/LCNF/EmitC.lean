@@ -21,6 +21,7 @@ import Init.Omega
 import Init.While
 import Lean.Compiler.LCNF.SimpCase
 import Lean.Compiler.LCNF.PrettyPrinter
+import Lean.Compiler.LCNF.Native
 
 namespace Lean.Compiler.LCNF
 
@@ -124,6 +125,7 @@ structure State where
   varMangleCache : Std.HashMap Name String := {}
   funMangleCache : Std.HashMap Name String := {}
   funInitMangleCache : Std.HashMap Name String := {}
+  nativePrograms : Std.HashMap Name (Option Native.Program) := {}
 
 abbrev EmitM := ReaderT Context StateRefT State CompilerM
 
@@ -638,6 +640,36 @@ where
   emitFap (fn : Name) (args : Array (Arg .impure)) : EmitM Unit := do
     let some sig ← getImpureSignature? fn | unreachable!
     let ps := sig.params
+    let program? ← nativeMapProgram? fn args
+    if let some program := program? then
+      emitLn "{"
+      emitLn s!"static const char lean_native_source[] = {quoteString program.source};"
+      let allTypes := program.captures ++ program.uniforms.map (·.type)
+      let kinds := if allTypes.isEmpty then "NULL"
+        else String.intercalate "," (allTypes.toList.map (quoteString ·.encode))
+      emitLn s!"static const char* const lean_native_kinds[] = \{{kinds}};"
+      emitLn "extern uint8_t lean_accelerator_native_wanted(lean_object*);"
+      emitLn "extern lean_object* lean_accelerator_native_map(const char*,const char* const*,unsigned,unsigned,unsigned,lean_object*,lean_object*,lean_object* const*);"
+      emit decl.binderName; emitLn " = NULL;"
+      emit "if (lean_accelerator_native_wanted("; emit args[args.size - 2]!; emitLn ")) {"
+      emitLn s!"lean_object* lean_uniforms[{max 1 program.uniforms.size}];"
+      for h : i in [:program.uniforms.size] do
+        let uniform := program.uniforms[i]
+        let some uniformSig ← getImpureSignature? uniform.function | unreachable!
+        let params := uniformSig.params.filter (! ·.type.isVoid)
+        let name ← toCName uniform.function
+        emitLn s!"extern lean_object* {name}({String.intercalate "," (params.toList.map (·.type.toCType))});"
+        emitLn s!"lean_uniforms[{i}] = {name}({String.intercalate "," (params.toList.map (fun _ => "lean_box(0)"))});"
+      emit decl.binderName; emit " = lean_accelerator_native_map(lean_native_source,lean_native_kinds,"
+      emit program.captures.size; emit ","; emit program.uniforms.size; emit ","; emit program.result; emit ","
+      emit args[args.size - 2]!; emit ","; emit args.back!; emitLn ",lean_uniforms);"
+      for i in [:program.uniforms.size] do emitLn s!"lean_dec(lean_uniforms[{i}]);"
+      emitLn "}"
+      emit "if ("; emit decl.binderName; emitLn " != NULL) {"
+      for p in ps, a in args do
+        if !p.borrow && p.type.isObj then
+          emitCApp1 "lean_dec" a; emitLn ";"
+      emitLn "} else {"
     withEmitAssignment do
       match getExternAttrData? (← getEnv) fn |>.bind (getExternEntryFor · `c) with
       | some (.standard _ fn) =>
@@ -661,6 +693,18 @@ where
               |>.unzip
           emit "("; emitArgs args; emit ")"
       | _ => throwError s!"failed to emit extern application '{fn}'"
+    if program?.isSome then emitLn "}\n}"
+
+  nativeMapProgram? (fn : Name) (args : Array (Arg .impure)) : EmitM (Option Native.Program) := do
+    unless (fn == `Array.ofFn._redArg || fn == ``Array.ofFn) && args.size >= 2 do return none
+    let .fvar closure := args.back! | return none
+    let some decl ← findLetDecl? (pu := .impure) closure | return none
+    let .pap mapper captures := decl.value | return none
+    if let some program := (← get).nativePrograms[mapper]? then return program
+    let program ← Native.compile? mapper
+    let program := program.filter (·.captures.size == captures.size)
+    modify fun s => { s with nativePrograms := s.nativePrograms.insert mapper program }
+    return program
 
   emitPap (fn : Name) (args : Array (Arg .impure)) : EmitM Unit := do
     let some sig ← getImpureSignature? fn | unreachable!
