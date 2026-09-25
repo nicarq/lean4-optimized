@@ -34,7 +34,17 @@ set(
   uv/system.cpp
   uv/signal.cpp
   openssl.cpp
+  accelerator_native.cpp
 )
+if(USE_METAL_ACCELERATOR AND APPLE)
+  enable_language(OBJCXX)
+  find_library(FOUNDATION_FRAMEWORK Foundation REQUIRED)
+  find_library(METAL_FRAMEWORK Metal REQUIRED)
+  list(APPEND RUNTIME_OBJS accelerator_native_metal.mm)
+  set_source_files_properties(accelerator_native.cpp PROPERTIES COMPILE_DEFINITIONS LEAN_USE_METAL_ACCELERATOR)
+  set_source_files_properties(accelerator_native_metal.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+  set(LEAN_EXTRA_LINKER_FLAGS "${LEAN_EXTRA_LINKER_FLAGS} -framework Foundation -framework Metal" PARENT_SCOPE)
+endif()
 if(USE_MIMALLOC)
   list(APPEND RUNTIME_OBJS ${LEAN_BINARY_DIR}/../mimalloc/src/mimalloc/src/static.c)
   # Lean code includes it as `lean/mimalloc.h` but for compiling `static.c` itself, add original dir
