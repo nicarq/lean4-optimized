@@ -1,0 +1,53 @@
+{
+  "workload": "Saved PiDEC replay, 13,680 blocks, 22 rows, 16 children, 54 coefficients",
+  "nightstream_commit": "7f51e1010ce382d15206d4d1fabcb27d88754cfe",
+  "lean_base": "f3b06c705e6c85f5314019d5d3baab0fec5b580c",
+  "hardware": "Apple M1 Max",
+  "cpu_seconds": [
+    7.3339774159830995,
+    7.310506457986776
+  ],
+  "metal_seconds": [
+    5.314444416027982,
+    4.024929874984082
+  ],
+  "cpu_median": 7.322241936984938,
+  "metal_median": 4.669687145506032,
+  "median_speedup": 1.5680369388411053,
+  "paired_speedups": [
+    1.3800083022534495,
+    1.8163065407482877
+  ],
+  "all_outputs_byte_identical": true,
+  "cpu_max_rss_bytes": 326057984,
+  "metal_max_rss_bytes": 1151680512,
+  "scope": "Experimental native batch replay driver, built with stock Lean 4.32.2 and the checked Nightstream objects; compiler and production Nightstream sources are unchanged.",
+  "timing": "Fresh processes; complete wrapped command including initialization, packing, Metal pipeline creation, GPU work, synchronization and output. Two paired comparisons in reversed order. Driver shader cache may already be warm. First final-binary Metal run had a longer pre-replay interval; that run is retained.",
+  "input_sha256_for_identification_only": "e785a171e8ce63aa14feeccf7439ce638ddacce0646eae426079a7f1d2bd9418",
+  "metal_system_trace_submissions": 1,
+  "profile_output_byte_identical": true,
+  "profile_dispatch": {
+    "operation": "pidec_batch",
+    "metal": true,
+    "submissions": 1,
+    "input_bytes": 142205184,
+    "device_ns": 284857249,
+    "elapsed_ns": 334178083
+  },
+  "cpu_batch_reference_seconds": 23.568822083994746,
+  "cpu_batch_reference_note": "Sequential typed reference; stock threaded CPU is the performance baseline.",
+  "validation": {
+    "cpp_kernel": "passed",
+    "lean_reference_and_fallback": "passed",
+    "input_rejections": [
+      "noncanonical coefficient",
+      "strict bound",
+      "duplicate block"
+    ],
+    "allowed_axioms": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ]
+  }
+}
