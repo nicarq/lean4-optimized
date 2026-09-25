@@ -1,0 +1,62 @@
+{
+  "date": "2026-09-25",
+  "hardware": "Apple M1 Max",
+  "workers": 10,
+  "nightstream_commit": "7f51e1010ce382d15206d4d1fabcb27d88754cfe",
+  "toolchain": "Official Lean 4.32.2",
+  "lean_base": "f3b06c705e6c85f5314019d5d3baab0fec5b580c",
+  "project_sources_changed": false,
+  "workload": "Complete canonical Poseidon2 hash-chain package emission",
+  "input": "Project definitions; no saved witness or selected coefficient range",
+  "command": "bash scripts/validate.sh lean-executable .lake/build/bin/emit --poseidon2-hash-chain-v1 NEW_OUTPUT",
+  "build_command": "bash scripts/validate.sh lean-executable lake build emit",
+  "build_scope": "Existing project and dependency caches; not a clean build",
+  "build_seconds": 15.0698529999936,
+  "complete_command_seconds": 55.10235775000183,
+  "timing_scope": "One unprofiled fresh process; startup, generation, serialization and output included",
+  "peak_process_rss_bytes": 971571200,
+  "output_bytes": 128098921,
+  "checked_artifact": "formal/nightstream-fprime/artifacts/nightstream-fprime-stage1-poseidon2-hash-chain-v1.json",
+  "complete_bytes_match": true,
+  "metal_speedup": null,
+  "metal_integration": "Absent from this normal project command; prototype changes only a separate replay driver",
+  "earlier_clean_build": {
+    "seconds": 744.1755230419803,
+    "targets": [
+      "NightstreamFPrime",
+      "NightstreamFPrimeTests",
+      "replayPiDECCommitment"
+    ],
+    "scope": "Clean project artifacts with prepared official dependency caches; separate earlier measurement"
+  },
+  "time_profiler": {
+    "trace_seconds": 55.18986,
+    "sampled_cpu_seconds": 55.056,
+    "missing_stack_percent": 0.012714327230456263,
+    "profile_output_byte_identical": true,
+    "application_column_count_inclusive_percent": 83.11718977041558,
+    "active_functions": [
+      {
+        "name": "_tlv_get_addr",
+        "percent": 18.528407439697762
+      },
+      {
+        "name": "mi_free",
+        "percent": 14.25276082534147
+      },
+      {
+        "name": "lean_dec_ref_cold",
+        "percent": 13.65155478058704
+      },
+      {
+        "name": "l_List_reverseAux___redArg",
+        "percent": 4.248401627433886
+      },
+      {
+        "name": "l_List_get_x3fInternal___redArg",
+        "percent": 4.084931705899447
+      }
+    ],
+    "scope": "Full normal emission. CPU sample shares, not wall-time fractions; inclusive frames overlap."
+  }
+}

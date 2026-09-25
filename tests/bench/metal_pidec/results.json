@@ -1,0 +1,127 @@
+{
+  "workload": "Constructed 13,680-block PiDEC arithmetic fixture",
+  "input_provenance": "First 738,720 serialized coefficients from a saved Rust parent witness, regrouped into blocks; 62,510 values reduced modulo the field. Not a reconstructed or verified complete parent witness.",
+  "normal_project_speedup_established": false,
+  "nightstream_commit": "7f51e1010ce382d15206d4d1fabcb27d88754cfe",
+  "lean_base": "f3b06c705e6c85f5314019d5d3baab0fec5b580c",
+  "prior_metal_commit": "e3ebab8e6273c26d79fad302aabbd4ab391733ea",
+  "hardware": "Apple M1 Max",
+  "workers": 10,
+  "runs": {
+    "stock": [
+      7.424110249965452,
+      7.473196167033166
+    ],
+    "prior": [
+      4.035334834014066,
+      4.013584250002168
+    ],
+    "candidate": [
+      2.0703429160057567,
+      2.0708445829804987
+    ]
+  },
+  "medians": {
+    "stock": 7.448653208499309,
+    "prior": 4.024459542008117,
+    "candidate": 2.0705937494931277
+  },
+  "peak_rss_bytes": {
+    "stock": 326025216,
+    "prior": 1151811584,
+    "candidate": 472662016
+  },
+  "all_outputs_byte_identical": true,
+  "first_new_process_seconds": 3.326975042000413,
+  "sequential_cpu_reference_seconds": 31.36218050000025,
+  "scope": "Explicit native replay experiment; production compiler and Nightstream proof sources unchanged.",
+  "timing": "Complete fresh-process command. Paired comparisons in forward/reverse order; system shader caches may be warm. The first new-binary validation run is reported separately, not discarded.",
+  "speedup_vs_stock": 3.5973513444260643,
+  "speedup_vs_prior_metal": 1.9436258527261985,
+  "rss_reduction_vs_prior": 0.5896359937980968,
+  "dispatch": {
+    "operation": "pidec_batch",
+    "metal": true,
+    "submissions": 1,
+    "input_bytes": 12299936,
+    "private_key_bytes": 130014720,
+    "host_key_bytes": 0,
+    "stages": 2,
+    "device_ns": 291810000,
+    "elapsed_ns": 309717875
+  },
+  "cpu_preparation_profile": {
+    "sampled_cpu_seconds": 19.365,
+    "groups": {
+      "Other": 11.63439194422928,
+      "ChaCha key generation": 50.29176349083398,
+      "Splitting and digit preparation": 36.16834495223341,
+      "Decoding": 1.9054996127033308
+    },
+    "active_functions": [
+      {
+        "name": "lp_nightstream__fprime_NightstreamFPrime_Export_NativeAjtaiChaCha_doubleRound",
+        "percent": 37.50064549444875
+      },
+      {
+        "name": "_xzm_free",
+        "percent": 7.007487735605474
+      },
+      {
+        "name": "_xzm_xzone_malloc",
+        "percent": 3.8729666924864445
+      },
+      {
+        "name": "_malloc_zone_malloc",
+        "percent": 3.1913245546088302
+      },
+      {
+        "name": "_free",
+        "percent": 2.8763232636199327
+      },
+      {
+        "name": "<deduplicated_symbol>",
+        "percent": 2.6077975729408727
+      },
+      {
+        "name": "lean_copy_expand_array",
+        "percent": 2.3341079266718308
+      },
+      {
+        "name": "_tlv_get_addr",
+        "percent": 1.8796798347534212
+      }
+    ],
+    "note": "CPU sample shares across all threads; not wall-time fractions."
+  },
+  "profile_dispatch": {
+    "operation": "pidec_batch",
+    "metal": true,
+    "submissions": 1,
+    "input_bytes": 12299936,
+    "private_key_bytes": 130014720,
+    "host_key_bytes": 0,
+    "stages": 2,
+    "device_ns": 293403458,
+    "elapsed_ns": 311577833
+  },
+  "metal_system_trace_submissions": 1,
+  "profile_output_byte_identical": true,
+  "validation": {
+    "independent_cpp_key_reference": "passed",
+    "independent_cpp_product_reference": "passed",
+    "lean_key_and_batch_reference": "passed",
+    "allowed_axioms": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "input_rejections": [
+      "noncanonical",
+      "strict-bound",
+      "duplicate"
+    ],
+    "native_batch_cases": "Both seeds: two GPU cases, unsupported-digit CPU fallback, empty CPU fallback."
+  },
+  "input_sha256_for_identification_only": "e785a171e8ce63aa14feeccf7439ce638ddacce0646eae426079a7f1d2bd9418"
+}
