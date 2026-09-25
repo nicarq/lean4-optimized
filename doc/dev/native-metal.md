@@ -66,9 +66,24 @@ output. Small 54-element launches were slower than CPU. A shared batching queue
 was slower again and was removed. A useful larger GPU region remains open;
 this change does not establish a faster Nightstream build or replay.
 That experiment also lowered native PiDEC product maps from unchanged source.
-The Lean 4.32.2 port needs fresh build and replay measurements. The current target
-is a 2× improvement over CPU for the clean build and saved replay; it has not been
-established. Small calls still need to be combined into larger device work.
+On an M1 Max, the 4.32.2 saved replay (13,680 blocks) produced byte-identical
+output with the new native modules. Complete-process times were 8.61 s for stock
+CPU, 8.93 s for the rebuilt CPU path, 7.79 s for automatic dispatch, and 271.25 s
+for forced Metal with a one-element threshold. Automatic dispatch retains CPU
+execution for these small maps. The 2× Nightstream target is not met.
+
+This replay comparison recompiles the unchanged ChaCha and PiDEC product modules
+with the fork and links the remaining checked stock 4.32.2 project objects. It
+is not a complete rebuild with the fork. The stock clean build and axiom checks
+passed in 744.18 s. The fork's full build invalidated official dependency caches
+and was stopped during dependency reconstruction; it supplies no comparable
+clean-project timing.
+
+A one-block native trace records 132 product chains and 3,922 individual maps.
+The attempts total 1.54 s, including packing, compilation, synchronization and
+boxing, while recorded device time totals 0.060 s. This cold sample is not the
+full replay's profile. Whole rows and blocks need larger GPU regions before
+small-map dispatch can meet the application target.
 
 ## Device residency
 
