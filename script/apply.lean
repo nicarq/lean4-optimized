@@ -3,7 +3,9 @@ Copyright (c) 2022 Sebastian Ullrich. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Sebastian Ullrich
 -/
-import Lean.Runtime
+module
+
+public meta import Lean.Runtime
 
 abbrev M := ReaderT IO.FS.Stream IO
 
@@ -50,8 +52,22 @@ def mkIncFs (n : Nat) : String :=
 def mkApplyI (n : Nat) (max : Nat) : M Unit := do
   let argDecls := mkArgDecls n
   let args := mkArgs n
-  emit s!"extern \"C\" LEAN_EXPORT obj* lean_apply_{n}(obj* f, {argDecls}) \{
-if (lean_is_scalar(f)) \{ {genSeq n (s!"lean_dec(a{·+1}); ") (sep := "")}return f; } // f is an erased proof
+  if n == 1 then
+    emit "#ifdef __GNUC__
+__attribute__((noinline))
+#endif
+static obj* apply_1_slow(obj* f, obj* a1);
+extern \"C\" LEAN_EXPORT obj* lean_apply_1(obj* f, obj* a1) {
+// A persistent unary closure has no captures and needs no reference-count update.
+// Keep the generic dispatch frame out of this tail-call path.
+if (!lean_is_scalar(f) && lean_closure_arity(f) == 1 && lean_is_persistent(f))
+  return FN1(f)(a1);
+return apply_1_slow(f, a1);
+}
+static obj* apply_1_slow(obj* f, obj* a1) {\n"
+  else
+    emit s!"extern \"C\" LEAN_EXPORT obj* lean_apply_{n}(obj* f, {argDecls}) \{\n"
+  emit s!"if (lean_is_scalar(f)) \{ {genSeq n (s!"lean_dec(a{·+1}); ") (sep := "")}return f; } // f is an erased proof
 unsigned arity = lean_closure_arity(f);
 unsigned fixed = lean_closure_num_fixed(f);
 if (arity == fixed + {n}) \{

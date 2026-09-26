@@ -98,7 +98,18 @@ default: return reinterpret_cast<fnn>(f)(as);
 }
 static obj* curry(obj* f, unsigned n, obj** as) { return curry(lean_closure_fun(f), n, as); }
 extern "C" obj* lean_apply_n(obj*, unsigned, obj**);
+#ifdef __GNUC__
+__attribute__((noinline))
+#endif
+static obj* apply_1_slow(obj* f, obj* a1);
 extern "C" LEAN_EXPORT obj* lean_apply_1(obj* f, obj* a1) {
+// A persistent unary closure has no captures and needs no reference-count update.
+// Keep the generic dispatch frame out of this tail-call path.
+if (!lean_is_scalar(f) && lean_closure_arity(f) == 1 && lean_is_persistent(f))
+  return FN1(f)(a1);
+return apply_1_slow(f, a1);
+}
+static obj* apply_1_slow(obj* f, obj* a1) {
 if (lean_is_scalar(f)) { lean_dec(a1); return f; } // f is an erased proof
 unsigned arity = lean_closure_arity(f);
 unsigned fixed = lean_closure_num_fixed(f);

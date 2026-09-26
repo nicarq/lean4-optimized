@@ -38,11 +38,15 @@ mpz::mpz(int v) {
     mpz_init_set_si(m_val, v);
 }
 
-mpz::mpz(uint64 v):
-    mpz(static_cast<unsigned>(v)) {
-    mpz tmp(static_cast<unsigned>(v >> 32));
-    mpz_mul_2exp(tmp.m_val, tmp.m_val, 32);
-    mpz_add(m_val, m_val, tmp.m_val);
+mpz::mpz(uint64 v) {
+    if constexpr (std::numeric_limits<unsigned long>::digits >= std::numeric_limits<uint64>::digits) {
+        mpz_init_set_ui(m_val, static_cast<unsigned long>(v));
+    } else {
+        mpz_init_set_ui(m_val, static_cast<unsigned>(v));
+        mpz tmp(static_cast<unsigned>(v >> 32));
+        mpz_mul_2exp(tmp.m_val, tmp.m_val, 32);
+        mpz_add(m_val, m_val, tmp.m_val);
+    }
 }
 
 mpz::mpz(int64 v) {
@@ -264,6 +268,10 @@ uint32 mpz::mod32() const {
 }
 
 uint64 mpz::mod64() const {
+    if constexpr (std::numeric_limits<unsigned long>::digits >= std::numeric_limits<uint64>::digits) {
+        uint64 low = static_cast<uint64>(mpz_get_ui(m_val));
+        return mpz_sgn(m_val) < 0 ? uint64(0) - low : low;
+    }
     mpz r;
     mpz_fdiv_r_2exp(r.m_val, m_val, 64);
     mpz l;
