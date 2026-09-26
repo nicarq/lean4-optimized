@@ -1,3 +1,5 @@
+module
+
 import Init.Data.SInt.Basic
 
 /-!
@@ -53,7 +55,7 @@ private def negativeCases : Array (Int × Int) := #[
   (-340282366920938463463374607431768211457, -1)
 ]
 
-def main : IO Unit := do
+public def main : IO Unit := do
   for (input, expectedUnsigned, expectedSigned) in natCases do
     let actualUnsigned := (unsignedOfNat input).toNat
     unless actualUnsigned == expectedUnsigned do

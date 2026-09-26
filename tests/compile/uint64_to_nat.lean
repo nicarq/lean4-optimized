@@ -1,3 +1,5 @@
+module
+
 /-!
 Check UInt64.toNat at the 32-bit split, tagged-Nat boundaries, the Goldilocks
 modulus, and UInt64's maximum. Inputs and expected Nats use separate literals.
@@ -23,7 +25,7 @@ private def boundaryCases : Array (UInt64 × Nat) := #[
   (0xffffffff_ffffffff, 18446744073709551615)
 ]
 
-def main : IO Unit := do
+public def main : IO Unit := do
   for (input, expected) in boundaryCases do
     -- Keep conversion in the runtime loop; do not round-trip the expected Nat.
     let actual := convertUInt64 input
